@@ -3,6 +3,7 @@ import math as m
 import matplotlib.pyplot as plt
 from matplotlib import animation
 from Interpolation import *
+from scipy.interpolate import CubicSpline
 
 # Условия области, в которой интегрируем
 xBegin, xEnd = 0, 300
@@ -33,7 +34,7 @@ eigenvalues = [m.sqrt((Lambda + 2 * mu) / rho), -m.sqrt((Lambda + 2 * mu) / rho)
 
 
 # Расчёт по СХМ
-def calc(I, useLimiter, orderInterpolation):
+def calc(I, orderInterpolation, useLimiter, useCubicSpline=False):
     N = 1 + int(300 * (tEnd - tBegin) * (I - 1) / courant / (xEnd - xBegin))  # число точек сетки по времени
     tau = (tEnd - tBegin) / (N - 1)
 
@@ -52,42 +53,40 @@ def calc(I, useLimiter, orderInterpolation):
     # Переводим начальное значение в инварианты Римана
     w[0] = np.einsum("ij,kj->ki", omega, u[0])
 
-    useCubicSpline = False  # Сплайн пока не использую
-
     # Решаем СХМ
     for n in range(1, N):
-        # if not useCubicSpline:
-        for i in range(I):
-            # Применяем к каждой компоненте перенос значений (если это возможно, см. гран. усл-я)
-            for k in range(len(eigenvalues)):
-                # Вычисляем координату, в которой нужно проинтерполировать функцию
-                x = (i * h + xArray[0]) - eigenvalues[k] * tau
-                if x > xArray[0] and x < xArray[-1]:
-                    # Интерполируем
-                    w[1, i, k] = wrapperInterpolation(x, xArray, h, w[0, :, k], orderInterpolation, useLimiter)
-                else:
-                    # Сделано в тупую, чтобы не париться сейчас с граничными условиями
-                    w[1, i, k] = 0
+        if not useCubicSpline:
+            for i in range(I):
+                # Применяем к каждой компоненте перенос значений (если это возможно, см. гран. усл-я)
+                for k in range(len(eigenvalues)):
+                    # Вычисляем координату, в которой нужно проинтерполировать функцию
+                    x = (i * h + xArray[0]) - eigenvalues[k] * tau
+                    if x > xArray[0] and x < xArray[-1]:
+                        # Интерполируем
+                        w[1, i, k] = wrapperInterpolation(x, xArray, h, w[0, :, k], orderInterpolation, useLimiter)
+                    else:
+                        # Сделано в тупую, чтобы не париться сейчас с граничными условиями
+                        w[1, i, k] = 0
+        else:
+            cubicSplines = [CubicSpline(xArray, w[0, :, 0], bc_type='natural'),
+                            CubicSpline(xArray, w[0, :, 1], bc_type='natural')]
+            for i in range(I):
+                # Применяем к каждой компоненте перенос значений (если это возможно, см. гран. усл-я)
+                for k in range(len(eigenvalues)):
+                    # Вычисляем координату, в которой нужно проинтерполировать функцию
+                    x = (i * h + xArray[0]) - eigenvalues[k] * tau
+                    if x > xArray[0] and x < xArray[-1]:
+                        # Интерполируем
+                        w[1, i, k] = cubicSplines[k](x)
+                        if useLimiter:
+                            index = m.floor((x - xArray[0]) / h)
+                            w[1, i, k] = limiter(w[1, i, k], w[0, index:(index + 2), k])
+                    else:
+                        w[1, i, k] = 0
 
-            # Возвращаемся к исходным переменным:
-            u[n, i] = omegaInv.dot(w[1, i])
-        # else:
-        #     cubicSplines = [CubicSpline(xArray, w[0, :, 0], bc_type='natural'),
-        #                     CubicSpline(xArray, w[0, :, 1], bc_type='natural')]
-        #     for i in range(I):
-        #         # Применяем к каждой компоненте перенос значений (если это возможно, см. гран. усл-я)
-        #         for k in range(len(eigenvalues)):
-        #             # Вычисляем координату, в которой нужно проинтерполировать функцию
-        #             x = (i * h + xArray[0]) - eigenvalues[k] * tau
-        #             if x > xArray[0] and x < xArray[-1]:
-        #                 # Интерполируем
-        #                 w[1, i, k] = cubicSplines[k](x)
-        #                 # Применяем лимитер
-        #                 # index = m.floor((x - xArray[0]) / h)
-        #                 # w[1, i, k] = limiter(w[1, i, k], w[0, index:(index + 2), k])
-        #
-        #         # Возвращаемся к исходным переменным:
-        #         u[n, i] = omegaInv.dot(w[1, i])
+        # Возвращаемся к исходным переменным:
+        u[n] = np.einsum("ij,kj->ki", omegaInv, w[1])
+
         w[0] = w[1]
         w[1] = np.zeros((I, 2))
 
@@ -124,18 +123,35 @@ def calc(I, useLimiter, orderInterpolation):
 
 IArray = [101, 201, 401, 801, 1601, 3201]
 orderInterpolation = [1, 2, 3]
+useLimiter = False, True
+
+print("ЧИСЛО КУРАНТА: " + str(courant))
+
 for order in orderInterpolation:
-    useLimiter = False, True
-    for limiter in useLimiter:
+    for limit in useLimiter:
         result = np.zeros((2, len(IArray)))
         for i in range(len(IArray)):
-            result[:, i] = calc(IArray[i], limiter, order)
+            result[:, i] = calc(IArray[i], order, limit, False)
 
         result = np.log(result)
 
         z = np.polyfit(result[0], result[1], 1)
 
         print("Order: " + str(order))
-        print("Use limiter: " + str(limiter))
+        print("Use limiter: " + str(limit))
         print("p: " + str(z[0]))
         print("====================")
+
+for limit in useLimiter:
+    result = np.zeros((2, len(IArray)))
+    for i in range(len(IArray)):
+        result[:, i] = calc(IArray[i], -1, limit, True)
+
+    result = np.log(result)
+
+    z = np.polyfit(result[0], result[1], 1)
+
+    print("CubicSpline")
+    print("Use limiter: " + str(limit))
+    print("p: " + str(z[0]))
+    print("====================")
