@@ -10,7 +10,7 @@ xBegin, xEnd = 0, 300
 tBegin, tEnd = 0, 0.2
 leftBorder = xBegin + 0.2 * (xEnd - xBegin)  # задаем левую границу нач. импульса
 rightBorder = xBegin + 0.3 * (xEnd - xBegin)  # задаем правую границу нач. импульса
-courant = 0.5
+courant = 0.2
 Lambda, mu, rho = 70000, 10000, 1
 
 
@@ -19,6 +19,15 @@ def initialCondition(x):
     if leftBorder < x < rightBorder:
         return m.exp(-4 * (2 * x - (leftBorder + rightBorder)) ** 2 / (
                 (rightBorder - leftBorder) ** 2 - (2 * x - (leftBorder + rightBorder)) ** 2))
+    return 0
+
+
+# Условие на функцию при t = 0
+# Более гладкая функция
+def initialConditionSmooth(x):
+    x /= xEnd
+    if -0.2 + m.pi / 10 < x < 0.4283:
+        return m.pow(m.sin(10 * x + 2), 2)
     return 0
 
 
@@ -94,17 +103,16 @@ def calc(I, orderInterpolation, useLimiter, useCubicSpline=False):
     analSigma = np.array([analSol(tEnd, x) for x in xArray])
 
     # Вычисляю евклидову норму. Может быть здесь ошибка?
-    error = m.sqrt(np.sum(np.square(analSigma - u[-1, :, 1]))) / I
+    error = m.sqrt(np.sum(np.square(analSigma - u[-1, :, 1])) / I)
     return np.array([h, error])
 
 
 # ЭТОТ БЛОК ДЛЯ ТОГО ЧТОБЫ ПОСМОТРЕТЬ РЕЗУЛЬТАТЫ РАСЧЁТА ДЛЯ КОНКРЕТНОГО МЕТОДА, С ГРАФИКОМ
-# IArray = [101, 201, 401, 801, 1601, 3201]
-# orderInterpolation = [1, 2, 3]
+# IArray = [401, 801, 1601, 3201, 6401]
 #
 # result = np.zeros((2, len(IArray)))
 # for i in range(len(IArray)):
-#     result[:, i] = calc(IArray[i], True, 3)
+#     result[:, i] = calc(IArray[i], 2, True, True)
 # print(result[0])
 # print(result[1])
 #
@@ -121,7 +129,7 @@ def calc(I, orderInterpolation, useLimiter, useCubicSpline=False):
 #
 # plt.show()
 
-IArray = [101, 201, 401, 801, 1601, 3201]
+IArray = [401, 801, 1601, 3201, 6401]
 orderInterpolation = [1, 2, 3]
 useLimiter = False, True
 
