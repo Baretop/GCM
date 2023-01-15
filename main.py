@@ -1,37 +1,40 @@
 import numpy as np
 import math as m
 import matplotlib.pyplot as plt
-from matplotlib import animation
 from Interpolation import *
 from scipy.interpolate import CubicSpline
+import csv
 
 # Условия области, в которой интегрируем
-xBegin, xEnd = 0, 300
+xBegin, xEnd = 0, 150
 tBegin, tEnd = 0, 0.2
-leftBorder = xBegin + 0.2 * (xEnd - xBegin)  # задаем левую границу нач. импульса
+leftBorder = xBegin + 0.1 * (xEnd - xBegin)  # задаем левую границу нач. импульса
 rightBorder = xBegin + 0.3 * (xEnd - xBegin)  # задаем правую границу нач. импульса
-courant = 0.2
+courant = 0.5
 Lambda, mu, rho = 70000, 10000, 1
 
 
-# Условие на функцию при t = 0
-def initialCondition(x):
+# # Условие на функцию при t = 0
+# def initialCondition(x):
+#     if leftBorder < x < rightBorder:
+#         return m.exp(-4 * (2 * x - (leftBorder + rightBorder)) ** 2 / (
+#                 (rightBorder - leftBorder) ** 2 - (2 * x - (leftBorder + rightBorder)) ** 2))
+#     return 0
+
+def jump(x):
     if leftBorder < x < rightBorder:
-        return m.exp(-4 * (2 * x - (leftBorder + rightBorder)) ** 2 / (
-                (rightBorder - leftBorder) ** 2 - (2 * x - (leftBorder + rightBorder)) ** 2))
+        return 1
     return 0
 
 
-# Условие на функцию при t = 0
-# Более гладкая функция
-def initialConditionSmooth(x):
-    x /= xEnd
-    if -0.2 + m.pi / 10 < x < 0.4283:
-        return m.pow(m.sin(10 * x + 2), 2)
+def sinSquared(x):
+    arg = x / xEnd
+    if 0.1 < arg < 0.3:
+        return m.sin(5 * m.pi * (arg + 0.1)) ** 2
     return 0
 
 
-def analSol(t, x):
+def analSol(t, x, initialCondition):
     return 90000 * initialCondition(x - 300 * t)
 
 
@@ -43,7 +46,7 @@ eigenvalues = [m.sqrt((Lambda + 2 * mu) / rho), -m.sqrt((Lambda + 2 * mu) / rho)
 
 
 # Расчёт по СХМ
-def calc(I, orderInterpolation, useLimiter, useCubicSpline=False):
+def calc(initialCondition, I, orderInterpolation, useLimiter, useCubicSpline=False):
     N = 1 + int(300 * (tEnd - tBegin) * (I - 1) / courant / (xEnd - xBegin))  # число точек сетки по времени
     tau = (tEnd - tBegin) / (N - 1)
 
@@ -100,66 +103,68 @@ def calc(I, orderInterpolation, useLimiter, useCubicSpline=False):
         w[1] = np.zeros((I, 2))
 
     # Аналитическое решение
-    analSigma = np.array([analSol(tEnd, x) for x in xArray])
+    analSigma = np.array([analSol(tEnd, x, initialCondition) for x in xArray])
 
-    # Вычисляю евклидову норму. Может быть здесь ошибка?
-    error = m.sqrt(np.sum(np.square(analSigma - u[-1, :, 1])) / I)
-    return np.array([h, error])
+    delta = np.abs(analSigma - u[-1, :, 1])
+    # Максимум модуля ошибки (C-норма)
+    error1 = delta.max()
+    # Среднее арифметическое модулей ошибок (L1 - норма)
+    error2 = np.sum(delta) / I
+    # Вычисляю евклидову норму (L2 - норма)
+    error3 = m.sqrt(np.sum(np.square(delta)) / I)
+    return np.array([h, error1, error2, error3]), xArray, u[-1, :, 1]
 
 
-# ЭТОТ БЛОК ДЛЯ ТОГО ЧТОБЫ ПОСМОТРЕТЬ РЕЗУЛЬТАТЫ РАСЧЁТА ДЛЯ КОНКРЕТНОГО МЕТОДА, С ГРАФИКОМ
-# IArray = [401, 801, 1601, 3201, 6401]
-#
-# result = np.zeros((2, len(IArray)))
-# for i in range(len(IArray)):
-#     result[:, i] = calc(IArray[i], 2, True, True)
-# print(result[0])
-# print(result[1])
-#
-# result = np.log(result)
-# z = np.polyfit(result[0], result[1], 1)
-# print(z)
-# p = np.poly1d(z)
-#
-#
-# fig = plt.figure()
-# ax = plt.axes(xlim=(m.log(300 / (IArray[-1] - 1)), m.log(300 / (IArray[0] - 1))), ylim=(np.amin(result[1]), np.amax(result[1])))
-# ax.plot(result[0], result[1], result[0], p(result[0]))
-# ax.grid()
-#
-# plt.show()
+def vizualize(file_writer, firstName, secondName, IArray, initialCondition, limit, order, useSpline):
+    xArrayForVizualize = np.linspace(xBegin, xEnd, 501)
+    analSigma = np.array([analSol(tEnd, x, initialCondition) for x in xArrayForVizualize])
 
-IArray = [401, 801, 1601, 3201, 6401]
-orderInterpolation = [1, 2, 3]
-useLimiter = False, True
-
-print("ЧИСЛО КУРАНТА: " + str(courant))
-
-for order in orderInterpolation:
-    for limit in useLimiter:
-        result = np.zeros((2, len(IArray)))
-        for i in range(len(IArray)):
-            result[:, i] = calc(IArray[i], order, limit, False)
-
-        result = np.log(result)
-
-        z = np.polyfit(result[0], result[1], 1)
-
-        print("Order: " + str(order))
-        print("Use limiter: " + str(limit))
-        print("p: " + str(z[0]))
-        print("====================")
-
-for limit in useLimiter:
-    result = np.zeros((2, len(IArray)))
+    result = np.zeros((4, len(IArray)))
     for i in range(len(IArray)):
-        result[:, i] = calc(IArray[i], -1, limit, True)
+        result[:, i], xArray, yArray = calc(initialCondition, IArray[i], order, limit, useSpline)
+
+        fig, ax = plt.subplots()
+        fig.set_dpi(300)
+        ax.plot(xArrayForVizualize, analSigma, xArray, yArray, linewidth=1)
+        ax.grid()
+        fig.savefig("results/images/" + ("jump" if initialCondition is jump else "sin^2") + "/" + firstName + "/" + str(
+            IArray[i]) + (", limit" if limit else "") + ".png")
+        plt.close()
 
     result = np.log(result)
 
-    z = np.polyfit(result[0], result[1], 1)
+    fig, ax = plt.subplots(1, 3)
+    fig.set_size_inches(12, 5)
+    fig.set_dpi(300)
+    fig.suptitle('Графики сходимости, С, L1, L2 нормы')
+    z = []
+    for i in range(3):
+        z.append(np.polyfit(result[0], result[i + 1], 1))
+        p = np.poly1d(z[-1])
 
-    print("CubicSpline")
-    print("Use limiter: " + str(limit))
-    print("p: " + str(z[0]))
-    print("====================")
+        ax[i].plot(result[0], result[i + 1], marker=".")
+        ax[i].plot(result[0], p(result[0]))
+        ax[i].grid()
+    fig.savefig("results/images/" + (
+        "jump" if initialCondition is jump else "sin^2") + "/" + firstName + "/plot for calculate order" + (
+                    ", limit" if limit else "") + ".png")
+    plt.close()
+
+    file_writer.writerow(
+        [secondName, "+" if limit else "-", ("jump" if initialCondition is jump else "sin^2"), f'{z[0][0]:.3f}',
+         f'{z[1][0]:.3f}', f'{z[2][0]:.3f}'])
+
+
+IArray = [51, 101, 201, 401, 801, 1601]
+orderInterpolation = [1, 2, 3]
+useLimiter = False, True
+
+with open("results/tables/order of approximation.csv", mode="w", encoding='utf-8') as w_file:
+    file_writer = csv.writer(w_file, delimiter=",", lineterminator="\r")
+    file_writer.writerow(["теор. порядок", "лимитер", "фронт", "C", "L1", "L2"])
+
+    for initialCondition in [jump, sinSquared]:
+        for limit in useLimiter:
+            for order in orderInterpolation:
+                vizualize(file_writer, str(order), str(order), IArray, initialCondition, limit, order, False)
+            vizualize(file_writer, "cubicSpline", "3 сплайн", IArray, initialCondition, limit, order, True)
